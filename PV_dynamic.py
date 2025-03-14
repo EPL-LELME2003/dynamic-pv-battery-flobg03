@@ -15,33 +15,77 @@ chargetime = 4  # hours to charge fully the battery
 model = ConcreteModel()
 
 # Define model variables
-##########################################
-############ CODE TO ADD HERE ############
-##########################################
+model.SOC_max = Var(within=NonNegativeReals)
+model.P_pv = Var(within=NonNegativeReals)
+
+model.SOC = Var(range(1, timestep+1), within=NonNegativeReals)
+model.P_batt_in = Var(range(1, timestep+1), within=NonNegativeReals)
+model.P_batt_out = Var(range(1, timestep+1), within=NonNegativeReals)
+model.E_pv = Var(range(1, timestep+1), within=NonNegativeReals)
 
 # Define the constraints
-##########################################
-############ CODE TO ADD HERE ############
-##########################################
+
+def balance(model,t):
+    return model.E_pv[t] - model.P_batt_in[t]/eff_batt_in == load[t-1] - model.P_batt_out[t]*eff_batt_out
+model.balance = Constraint(range(1, timestep+1), rule=balance)
+
+def max_charge(model,t):
+    return model.P_batt_in[t]/eff_batt_in <= model.SOC_max/chargetime
+model.max_charge = Constraint(range(1, timestep+1), rule=max_charge)
+
+def max_discharge(model,t):
+    return model.P_batt_out[t]*eff_batt_out <= model.SOC_max/chargetime
+model.max_discharge = Constraint(range(1, timestep+1), rule=max_discharge)
+
+def production(model,t):
+    return model.E_pv[t] <= model.P_pv*lf_pv[t-1]
+model.production = Constraint(range(1, timestep+1), rule=production)
+
+def state_of_charge(model,t):
+    if t == 1:
+        return model.SOC[t] == model.SOC[24]
+    else:
+        return model.SOC[t] == model.SOC[t-1] + model.P_batt_in[t] - model.P_batt_out[t]
+model.state_of_charge = Constraint(range(1, timestep+1), rule=state_of_charge)
+
+def max_soc(model,t):
+    return model.SOC[t] <= model.SOC_max
+model.max_soc = Constraint(range(1, timestep+1), rule=max_soc)
 
 # Define the objective functions
-##########################################
-############ CODE TO ADD HERE ############
-##########################################
+
+def cost(model):
+    return c_pv*model.P_pv + c_batt*model.SOC_max
+model.obj = Objective(rule=cost, sense=minimize)
 
 
 # Specify the path towards your solver (gurobi) file
-solver = SolverFactory('...')
+solver = SolverFactory('gurobi')
 solver.solve(model)
 
 # Results - Print the optimal PV size and optimal battery capacity
-##########################################
-############ CODE TO ADD HERE ############
-##########################################
+print('Optimal PV size: ', model.P_pv())
+print('Optimal battery capacity: ', model.SOC_max())
 
 
 # Plotting - Generate a graph showing the evolution of (i) the load, 
 # (ii) the PV production and, (iii) the soc of the battery
-##########################################
-############ CODE TO ADD HERE ############
-##########################################
+
+# Extract results for plotting
+load_values = load
+pv_production = [model.E_pv[t]() for t in range(1, timestep+1)]
+soc_values = [model.SOC[t]() for t in range(1, timestep+1)]
+
+# Plotting
+plt.figure(figsize=(10, 6))
+
+plt.plot(range(1, timestep+1), load_values, label='Load', marker='o')
+plt.plot(range(1, timestep+1), pv_production, label='PV Production', marker='x')
+plt.plot(range(1, timestep+1), soc_values, label='SOC of Battery', marker='s')
+
+plt.xlabel('Time (hours)')
+plt.ylabel('Power (kW) / State of Charge (kWh)')
+plt.title('Load, PV Production, and SOC of Battery Over Time')
+plt.legend()
+plt.grid(True)
+plt.show()
